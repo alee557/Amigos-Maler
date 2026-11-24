@@ -1,0 +1,27 @@
+.section {
+  --home-calculator-header-height: 90px;
+  box-sizing: border-box;
+  position: relative;
+  width: 100%;
+  min-height: 100svh;
+  margin: 0;
+  padding: 0;
+  overflow: clip;
+  scroll-margin-top: var(--home-calculator-header-height);
+  background: transparent;
+}
+
+/* The calculator owns its complete day/night scene. The homepage wrapper must
+   not introduce a second image, tint, font colour, spacing system, or overlay. */
+.section :global(.offerCalculatorEmbedded) {
+  width: 100%;
+  min-height: 100svh;
+  height: auto;
+  max-height: none;
+}
+
+@media (max-width: 900px) {
+  .section {
+    --home-calculator-header-height: 86px;
+  }
+}

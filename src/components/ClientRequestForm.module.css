@@ -1,0 +1,148 @@
+.section { width: min(100% - 2rem, 58rem); margin: 3rem auto; padding: clamp(1.25rem,4vw,3rem); background: #fff; color: #14263a; border: 1px solid #d9dfe4; border-radius: 18px; scroll-margin-top: 100px; }
+.section h2 { margin: 0 0 1.5rem; font-size: clamp(1.65rem,3vw,2.5rem); line-height: 1.15; color: inherit; }
+.form { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,17rem),1fr)); gap: 1rem; }
+.form label { display: grid; gap: .4rem; font-weight: 600; }
+.form :is(input,textarea,select) { min-width:0; width:100%; border:1px solid #788694; border-radius:6px; padding:.7rem; color:#14263a; background:#fff; font:inherit; }
+.form button { align-self:end; justify-self:start; border:0; background:#122e43; color:#fff; border-radius:1.5rem; padding:.85rem 1.3rem; font:inherit; cursor:pointer; }
+.form button:disabled { opacity:.6; }
+.form p { grid-column:1 / -1; overflow-wrap:anywhere; }
+
+.form input[type="checkbox"] {width:20px;height:20px;min-height:20px;padding:0;}
+.form label:has(input[type="checkbox"]) {grid-column:1 / -1;display:flex;align-items:flex-start;gap:12px;}
+
+.partnerSection {
+  width: min(calc(100% - 48px), 1180px) !important;
+  margin: 72px auto 110px !important;
+  padding: clamp(28px, 5vw, 64px) !important;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.16) !important;
+  border-radius: 32px !important;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(230,36,83,.18), transparent 36%),
+    radial-gradient(circle at 0% 100%, rgba(246,190,16,.12), transparent 32%),
+    linear-gradient(135deg, #071a33 0%, #0b2543 58%, #17172d 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 32px 80px rgba(4,15,30,.32) !important;
+}
+
+.partnerHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 48px;
+  margin-bottom: 42px;
+  padding-bottom: 34px;
+  border-bottom: 1px solid rgba(255,255,255,.14);
+}
+
+.partnerHeader > div { max-width: 690px; }
+.partnerHeader h2 { margin: 8px 0 14px !important; color: #fff !important; font-size: clamp(38px, 5vw, 68px) !important; letter-spacing: -.045em; }
+.partnerEyebrow { margin: 0 !important; color: #f6be10 !important; font-size: 12px; font-weight: 900; letter-spacing: .22em; text-transform: uppercase; }
+.partnerLead { max-width: 640px; margin: 0 !important; color: rgba(255,255,255,.72) !important; font-size: 17px; line-height: 1.6; }
+
+.partnerLogin {
+  display: inline-flex;
+  min-width: 220px;
+  min-height: 58px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px 22px;
+  border: 1px solid rgba(255,255,255,.38);
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  color: #fff !important;
+  text-decoration: none;
+  font-weight: 800;
+  transition: background .2s ease, border-color .2s ease, color .2s ease;
+}
+.partnerLogin span { color: rgba(255,255,255,.62) !important; font-size: 12px; font-weight: 600; }
+.partnerLogin b { font-size: 22px; line-height: 1; }
+.partnerLogin:hover { border-color: #fff; background: #fff; color: #071a33 !important; }
+.partnerLogin:hover span { color: #526072 !important; }
+
+.partnerForm { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; }
+.partnerForm label { gap: 9px; color: rgba(255,255,255,.9) !important; font-size: 14px; font-weight: 750; }
+.partnerForm :is(input, textarea, select) {
+  min-height: 58px;
+  border: 1px solid rgba(255,255,255,.2) !important;
+  border-radius: 14px !important;
+  padding: 14px 16px !important;
+  background: rgba(255,255,255,.96) !important;
+  color: #071a33 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 8px 20px rgba(0,0,0,.08);
+  outline: none;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+.partnerForm :is(input, textarea, select):focus {
+  border-color: #f6be10 !important;
+  background: #fff !important;
+  box-shadow: 0 0 0 4px rgba(246,190,16,.2), 0 10px 24px rgba(0,0,0,.12) !important;
+}
+.partnerForm textarea { min-height: 150px; resize: vertical; }
+.partnerForm label:has(textarea),
+.partnerForm label:has(input[type="file"]),
+.partnerForm .checkboxLabel { grid-column: 1 / -1; }
+.partnerForm input[type="file"] { min-height: 58px; padding: 10px !important; }
+.partnerForm input[type="file"]::file-selector-button {
+  margin-right: 12px;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: #e9edf2;
+  color: #071a33;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.partnerForm .checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 17px 18px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  background: rgba(255,255,255,.055);
+}
+.partnerForm .checkboxLabel input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  flex: 0 0 22px;
+  padding: 0 !important;
+  accent-color: #f6be10;
+  box-shadow: none;
+}
+.privacyLink {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: -10px;
+  color: #f6be10 !important;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.privacyLink:hover { color: #fff !important; }
+.partnerForm button {
+  grid-column: 1 / -1;
+  min-height: 60px;
+  justify-self: start;
+  padding: 0 32px;
+  border-radius: 999px;
+  background: linear-gradient(105deg, #f6be10 0%, #f39125 48%, #e62453 100%);
+  color: #fff;
+  font-weight: 900;
+  box-shadow: 0 18px 38px rgba(230,36,83,.2);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.partnerForm button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 22px 44px rgba(230,36,83,.3); }
+
+@media (max-width: 760px) {
+  .partnerSection { width: min(calc(100% - 28px), 1180px) !important; margin-block: 48px 72px !important; border-radius: 24px !important; }
+  .partnerHeader { display: grid; gap: 24px; margin-bottom: 30px; padding-bottom: 28px; }
+  .partnerLogin { width: 100%; }
+  .partnerForm { grid-template-columns: 1fr; gap: 18px; }
+  .partnerForm > * { grid-column: 1 !important; }
+  .partnerForm button { width: 100%; justify-self: stretch; }
+}

@@ -1,0 +1,18 @@
+.heroContent.heroContent {
+  width: calc(100% - 90px);
+  max-width: none;
+  margin-inline: 45px;
+}
+
+.heroHeadingLine {
+  display: block;
+  color: inherit;
+  -webkit-text-fill-color: currentColor;
+}
+
+@media (max-width: 1360px) {
+  .heroContent.heroContent {
+    width: calc(100% - 56px);
+    margin-inline: 28px;
+  }
+}

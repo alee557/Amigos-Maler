@@ -1,0 +1,464 @@
+import crypto from "node:crypto";
+import { sql } from "@/lib/db";
+import { calculateOfferPrice, calculateQuickQuotePrice } from "@/lib/offerCalculator/pricing";
+import { getPricingSettings } from "@/lib/offerCalculator/pricingSettings";
+
+const globalForOfferCalculator = globalThis;
+const memorySessions = globalForOfferCalculator.__offerCalculatorMemorySessions || new Map();
+const memoryPhotos = globalForOfferCalculator.__offerCalculatorMemoryPhotos || new Map();
+
+if (process.env.NODE_ENV !== "production") {
+  globalForOfferCalculator.__offerCalculatorMemorySessions = memorySessions;
+  globalForOfferCalculator.__offerCalculatorMemoryPhotos = memoryPhotos;
+}
+
+function hashCode(code, sessionId) {
+  const secret = process.env.SESSION_SECRET;
+  if (!secret && process.env.NODE_ENV === "production") throw new Error("SESSION_SECRET is required.");
+  return crypto.createHash("sha256").update(`${sessionId}:${code}:${secret || "amigos-development-only"}`).digest("hex");
+}
+
+function projectTitle(project) {
+  const property = project.propertyType || "Project";
+  const service = Array.isArray(project.services) && project.services.length ? project.services[0] : "painting";
+
+  return `Online ${service.replaceAll("_", " ")} request - ${property}`;
+}
+
+function serviceSummary(project) {
+  return Array.isArray(project.services) && project.services.length
+    ? project.services.map((service) => service.replaceAll("_", " ")).join(", ")
+    : "Online request";
+}
+
+function customerFullName(info) {
+  return `${info.firstName || ""} ${info.lastName || ""}`.trim() || "Online visitor";
+}
+
+export function createVerificationCode() {
+  return String(crypto.randomInt(1000, 10000));
+}
+
+export async function createOrUpdateCalculation(project, options = {}) {
+  const settings = options.settings || (await getPricingSettings());
+  const price = options.quickQuote
+    ? calculateQuickQuotePrice(options.quickQuote, settings)
+    : calculateOfferPrice(project, { ...options, settings });
+  const id = crypto.randomUUID();
+
+  const leadSource = options.source === "QUICK_QUOTE" ? "QUICK_QUOTE" : "DETAILED_QUOTE";
+  const memorySession = {
+    id,
+    mode: project.mode,
+    status: "CALCULATED",
+    propertyType: project.propertyType,
+    roomType: project.roomType || null,
+    components: project.components,
+    services: project.services,
+    quantities: project.quantities,
+    projectNotes: project.projectNotes || null,
+    minCents: price.minCents,
+    maxCents: price.maxCents,
+    currency: price.currency,
+    condition: options.condition || null,
+    postalCode: options.postalCode || null,
+    city: options.locationCity || null,
+    source: leadSource,
+    verificationAttempts: 0
+  };
+
+  let session;
+  try {
+    [session] = await sql`
+      insert into offer_calculator_sessions (
+        id, mode, status, property_type, room_type, components, services, quantities,
+        project_notes, estimated_min_cents, estimated_max_cents, currency,
+        condition, postal_code, city, source
+      )
+      values (
+        ${id}, ${project.mode}, ${"CALCULATED"}, ${project.propertyType}, ${project.roomType || null},
+        ${sql.json(project.components)}, ${sql.json(project.services)}, ${sql.json(project.quantities)},
+        ${project.projectNotes || null}, ${price.minCents}, ${price.maxCents}, ${price.currency},
+        ${options.condition || null}, ${options.postalCode || null}, ${options.locationCity || null}, ${leadSource}
+      )
+      returning id, status, currency
+    `;
+  } catch (error) {
+    if (process.env.NODE_ENV === "production") throw error;
+    console.warn("[offer calculator] Database unavailable; using in-memory session.", error?.code || error?.message);
+    memorySessions.set(id, memorySession);
+    session = { id, status: memorySession.status, currency: memorySession.currency };
+  }
+
+  return {
+    sessionId: session.id,
+    status: session.status,
+    currency: session.currency,
+    quickPriceCents: options.quickQuote ? price.maxCents : undefined
+  };
+}
+
+export async function attachVerificationCode({ sessionId, email, code, customerInfo }) {
+  const memorySession = memorySessions.get(sessionId);
+  if (memorySession) {
+    memorySession.email = email;
+    memorySession.customerInfo = { ...(memorySession.customerInfo || {}), ...(customerInfo || {}) };
+    memorySession.codeHash = hashCode(code, sessionId);
+    memorySession.expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    memorySession.verificationAttempts = 0;
+    memorySession.status = "VERIFYING";
+    memorySessions.set(sessionId, memorySession);
+    return memorySession;
+  }
+
+  const [curr] = await sql`
+    select updated_at as "updatedAt", verification_expires_at as "expiresAt"
+    from offer_calculator_sessions
+    where id = ${sessionId}
+  `;
+
+  if (!curr) return null;
+
+  // Rate limit: 1 code per 60 seconds (spec §3.4)
+  if (curr.expiresAt && new Date(curr.expiresAt).getTime() - Date.now() > 14 * 60 * 1000) {
+    return { rateLimited: true, message: "Please wait 60 seconds before requesting another code." };
+  }
+
+  const info = customerInfo || {};
+  const [session] = await sql`
+    update offer_calculator_sessions
+    set email = ${email},
+      customer_info = coalesce(customer_info, '{}'::jsonb) || ${sql.json(info)},
+      verification_code_hash = ${hashCode(code, sessionId)},
+      verification_expires_at = now() + interval '15 minutes',
+      verification_attempts = 0,
+      status = 'VERIFYING',
+      updated_at = now()
+    where id = ${sessionId}
+    returning id, email, property_type as "propertyType", room_type as "roomType", components, services,
+      quantities, project_notes as "projectNotes", estimated_min_cents as "minCents",
+      estimated_max_cents as "maxCents", currency, consultation_id as "consultationId", project_id as "projectId",
+      customer_info as "customerInfo", condition, postal_code as "postalCode", city, source
+  `;
+
+  if (session && !session.projectId) {
+    await createProvisionalCrmLead(session);
+  }
+
+  return session;
+}
+
+async function createProvisionalCrmLead(session) {
+  const service = serviceSummary(session);
+  const title = projectTitle(session);
+  const message = [
+    "New Online Request from Offer Calculator.",
+    "Customer reached e-mail verification.",
+    session.projectNotes ? `Notes: ${session.projectNotes}` : "",
+    `Property type: ${session.propertyType}`,
+    session.roomType ? `Room type: ${session.roomType}` : "",
+    `Components: ${(session.components || []).join(", ")}`,
+    `Services: ${(session.services || []).join(", ")}`,
+    `Quantities: ${JSON.stringify(session.quantities || {})}`
+  ].filter(Boolean).join("\n");
+
+  const leadSource = session.source === "QUICK_QUOTE" ? "QUICK_QUOTE" : "DETAILED_QUOTE";
+  const customerInfo = session.customerInfo || {};
+  const name = [customerInfo.firstName, customerInfo.lastName].filter(Boolean).join(" ") || "Online visitor";
+  const phone = customerInfo.phone || null;
+
+  const leadMetadata = {
+    calculatorSessionId: session.id,
+    source: leadSource,
+    provisional: true,
+    name,
+    phone,
+    condition: session.condition || null,
+    postalCode: session.postalCode || null,
+    city: session.city || null,
+    propertyType: session.propertyType || null,
+    components: session.components || [],
+    services: session.services || [],
+    quantities: session.quantities || {},
+    estimate: { minCents: session.minCents, maxCents: session.maxCents, currency: session.currency }
+  };
+
+  const [consultation] = await sql`
+    insert into consultations (id, name, email, phone, project_type, message, source, metadata)
+    values (
+      ${crypto.randomUUID()}, ${name}, ${session.email}, ${phone}, ${"Online Request"},
+      ${message}, ${leadSource},
+      ${sql.json(leadMetadata)}
+    )
+    returning id
+  `;
+
+  const [project] = await sql`
+    insert into projects (
+      id, consultation_id, title, service, stage, priority,
+      estimated_value_cents, estimated_min_cents, estimated_max_cents, currency,
+      source, workflow, metadata
+    )
+    values (
+      ${crypto.randomUUID()}, ${consultation.id}, ${title}, ${service}, ${"NEW_LEAD"}, ${"NORMAL"},
+      ${session.maxCents}, ${session.minCents}, ${session.maxCents}, ${session.currency},
+      ${leadSource}, ${"Review"},
+      ${sql.json(leadMetadata)}
+    )
+    returning id
+  `;
+
+  await sql`
+    update offer_calculator_sessions
+    set consultation_id = ${consultation.id}, project_id = ${project.id}, updated_at = now()
+    where id = ${session.id}
+  `;
+
+  await sql`
+    insert into crm_tasks (id, project_id, title, status)
+    values (${crypto.randomUUID()}, ${project.id}, ${"Review online calculator lead"}, ${"OPEN"})
+  `;
+}
+
+export async function verifySessionCode({ sessionId, code }) {
+  const memorySession = memorySessions.get(sessionId);
+  if (memorySession) {
+    if (memorySession.verificationAttempts >= 5) return { error: "Too many attempts. Please resend a new code." };
+    if (!memorySession.expiresAt || new Date(memorySession.expiresAt).getTime() < Date.now()) return { error: "This code expired. Please resend it." };
+
+    if (memorySession.codeHash !== hashCode(code, sessionId)) {
+      memorySession.verificationAttempts += 1;
+      memorySessions.set(sessionId, memorySession);
+      return { error: "The verification code is not correct." };
+    }
+
+    memorySession.emailVerifiedAt = new Date().toISOString();
+    memorySession.status = "PRICE_UNLOCKED";
+    memorySessions.set(sessionId, memorySession);
+    return { session: memorySession };
+  }
+
+  const [session] = await sql`
+    select id, verification_code_hash as "codeHash", verification_expires_at as "expiresAt",
+      verification_attempts as "attempts", estimated_min_cents as "minCents",
+      estimated_max_cents as "maxCents", currency, email, project_id as "projectId"
+    from offer_calculator_sessions
+    where id = ${sessionId}
+  `;
+
+  if (!session) return { error: "Calculation session not found." };
+  if (session.attempts >= 5) return { error: "Too many attempts. Please resend a new code." };
+  if (!session.expiresAt || new Date(session.expiresAt).getTime() < Date.now()) return { error: "This code expired. Please resend it." };
+
+  const matches = session.codeHash === hashCode(code, sessionId);
+
+  if (!matches) {
+    await sql`
+      update offer_calculator_sessions
+      set verification_attempts = verification_attempts + 1, updated_at = now()
+      where id = ${sessionId}
+    `;
+
+    return { error: "The verification code is not correct." };
+  }
+
+  const [verified] = await sql`
+    update offer_calculator_sessions
+    set email_verified_at = now(), status = 'PRICE_UNLOCKED', updated_at = now()
+    where id = ${sessionId}
+    returning id, email, estimated_min_cents as "minCents", estimated_max_cents as "maxCents", currency, project_id as "projectId"
+  `;
+
+  if (verified?.projectId) {
+    try {
+      await sql`
+        update projects
+        set metadata = jsonb_set(coalesce(metadata, '{}'::jsonb), '{provisional}', 'false'::jsonb)
+        where id = ${verified.projectId}
+      `;
+      await sql`
+        insert into crm_notes (id, project_id, author_name, note)
+        values (${crypto.randomUUID()}, ${verified.projectId}, 'System', 'E-mail verified, price shown')
+      `;
+    } catch (err) {
+      console.error("Error updating verified project crm status:", err);
+    }
+  }
+
+  return { session: verified };
+}
+
+export async function getVerifiedSession(sessionId) {
+  const memorySession = memorySessions.get(sessionId);
+  if (memorySession) return memorySession.emailVerifiedAt ? memorySession : null;
+
+  const [session] = await sql`
+    select id, mode, status, email, email_verified_at as "emailVerifiedAt",
+      property_type as "propertyType", room_type as "roomType", components, services, quantities,
+      project_notes as "projectNotes", estimated_min_cents as "minCents",
+      estimated_max_cents as "maxCents", currency, project_id as "projectId",
+      condition, postal_code as "postalCode", city, source
+    from offer_calculator_sessions
+    where id = ${sessionId}
+  `;
+
+  if (!session || !session.emailVerifiedAt) return null;
+
+  return session;
+}
+
+export async function addProjectPhoto({ sessionId, category, file }) {
+  if (memorySessions.has(sessionId)) {
+    const photo = { id: crypto.randomUUID(), category, fileName: file.name };
+    const current = memoryPhotos.get(sessionId) || [];
+    memoryPhotos.set(sessionId, [...current, photo]);
+    return { photo };
+  }
+
+  const [session] = await sql`select id from offer_calculator_sessions where id = ${sessionId}`;
+  if (!session) return { error: "Calculation session not found." };
+
+  const [photo] = await sql`
+    insert into offer_calculator_photos (id, session_id, category, file_name, file_type, file_size, data_url)
+    values (${crypto.randomUUID()}, ${sessionId}, ${category}, ${file.name}, ${file.type}, ${file.size}, ${file.dataUrl})
+    returning id, category, file_name as "fileName"
+  `;
+
+  return { photo };
+}
+
+export async function submitOfferRequest({ sessionId, customerInfo, calculatorState = null }) {
+  const session = await getVerifiedSession(sessionId);
+
+  if (!session) return { error: "Please verify your e-mail before requesting an offer." };
+
+  if (memorySessions.has(sessionId)) {
+    const projectId = crypto.randomUUID();
+    const consultationId = crypto.randomUUID();
+    memorySessions.set(sessionId, {
+      ...session,
+      customerInfo,
+      calculatorState,
+      requestedAction: customerInfo.requestedAction,
+      status: "REQUEST_SUBMITTED",
+      projectId,
+      consultationId
+    });
+    return { projectId, consultationId };
+  }
+
+  const name = customerFullName(customerInfo);
+  const service = serviceSummary(session);
+  const title = projectTitle(session);
+  const message = [
+    "New Online Request from Offer Calculator.",
+    session.projectNotes ? `Notes: ${session.projectNotes}` : "",
+    `Property type: ${session.propertyType}`,
+    session.roomType ? `Room type: ${session.roomType}` : "",
+    `Components: ${(session.components || []).join(", ")}`,
+    `Services: ${(session.services || []).join(", ")}`,
+    `Quantities: ${JSON.stringify(session.quantities || {})}`,
+    `Requested action: ${customerInfo.requestedAction}`
+  ].filter(Boolean).join("\n");
+
+  const [property] = await sql`
+    insert into properties (id, label, address, property_type)
+    values (
+      ${crypto.randomUUID()},
+      ${customerInfo.company || `${name} Property`},
+      ${`${customerInfo.address}, ${customerInfo.postalCode} ${customerInfo.city}`},
+      ${session.propertyType}
+    )
+    returning id
+  `;
+
+  const workflow = customerInfo.requestedAction === "CONSULTATION" ? "Contact Customer" : "Review";
+  const leadSource = session.source === "QUICK_QUOTE" ? "QUICK_QUOTE" : "DETAILED_QUOTE";
+  let consultation = { id: session.consultationId };
+  let project = { id: session.projectId };
+  const metadata = {
+    calculatorSessionId: session.id,
+    source: leadSource,
+    provisional: false,
+    components: session.components,
+    services: session.services,
+    quantities: session.quantities,
+    condition: session.condition || null,
+    postalCode: session.postalCode || null,
+    city: session.city || null,
+    projectNotes: session.projectNotes || null,
+    calculatorState,
+    customerInfo,
+    requestedAction: customerInfo.requestedAction,
+    estimate: { minCents: session.minCents, maxCents: session.maxCents, currency: session.currency }
+  };
+
+  if (consultation.id) {
+    [consultation] = await sql`
+      update consultations
+      set name = ${name}, email = ${customerInfo.email}, phone = ${customerInfo.phone},
+        project_type = ${"Online Request"}, message = ${message}, source = ${leadSource}, metadata = ${sql.json(metadata)}, updated_at = now()
+      where id = ${consultation.id}
+      returning id
+    `;
+  } else {
+    [consultation] = await sql`
+      insert into consultations (id, name, email, phone, project_type, message, source, metadata)
+      values (${crypto.randomUUID()}, ${name}, ${customerInfo.email}, ${customerInfo.phone}, ${"Online Request"},
+        ${message}, ${leadSource}, ${sql.json(metadata)})
+      returning id
+    `;
+  }
+
+  if (project.id) {
+    [project] = await sql`
+      update projects
+      set consultation_id = ${consultation.id}, property_id = ${property.id}, title = ${title}, service = ${service},
+        estimated_value_cents = ${session.maxCents}, estimated_min_cents = ${session.minCents},
+        estimated_max_cents = ${session.maxCents}, currency = ${session.currency}, workflow = ${workflow},
+        source = ${leadSource}, metadata = ${sql.json(metadata)}, updated_at = now()
+      where id = ${project.id}
+      returning id
+    `;
+  } else {
+    [project] = await sql`
+      insert into projects (
+        id, consultation_id, property_id, title, service, stage, priority,
+        estimated_value_cents, estimated_min_cents, estimated_max_cents, currency,
+        source, workflow, metadata
+      )
+      values (
+        ${crypto.randomUUID()}, ${consultation.id}, ${property.id}, ${title}, ${service}, ${"NEW_LEAD"}, ${"NORMAL"},
+        ${session.maxCents}, ${session.minCents}, ${session.maxCents}, ${session.currency},
+        ${leadSource}, ${workflow}, ${sql.json(metadata)}
+      )
+      returning id
+    `;
+  }
+
+  await sql`
+    update offer_calculator_sessions
+    set customer_info = ${sql.json(customerInfo)}, consultation_id = ${consultation.id}, project_id = ${project.id},
+      requested_action = ${customerInfo.requestedAction}, status = 'REQUEST_SUBMITTED', updated_at = now()
+    where id = ${sessionId}
+  `;
+
+  await sql`
+    insert into crm_notes (id, project_id, author_type, body)
+    values (${crypto.randomUUID()}, ${project.id}, ${"SYSTEM"}, ${"Online calculator request created. Review project data, contact the customer, then move through Inspection -> Final Offer -> Accepted -> Project -> Invoice."})
+  `;
+
+  await sql`
+    insert into crm_tasks (id, project_id, title, status)
+    values (${crypto.randomUUID()}, ${project.id}, ${"Review online request and contact customer"}, ${"OPEN"})
+  `;
+
+  if (customerInfo.requestedAction === "CONSULTATION") {
+    await sql`
+      insert into appointments (id, consultation_id, title, date, time, status)
+      values (${crypto.randomUUID()}, ${consultation.id}, ${"Consultation: Online Request"}, ${"Pending"}, ${"Pending"}, ${"PENDING"})
+    `;
+  }
+
+  return { projectId: project.id, consultationId: consultation.id };
+}
