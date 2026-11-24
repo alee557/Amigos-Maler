@@ -317,6 +317,16 @@
   -webkit-text-fill-color: #071a33 !important;
 }
 
+:global(html:not([data-theme="amigos-dark"]):not([data-theme="dark"]) body #siteHeader #services-panel) .intro strong {
+  color: #071a33 !important;
+  -webkit-text-fill-color: #071a33 !important;
+}
+
+:global(html:not([data-theme="amigos-dark"]):not([data-theme="dark"]) body #siteHeader #services-panel) .intro span {
+  color: #667085 !important;
+  -webkit-text-fill-color: #667085 !important;
+}
+
 :global(html:not([data-theme="amigos-dark"]):not([data-theme="dark"])) .allServices,
 :global(html:not([data-theme="amigos-dark"]):not([data-theme="dark"])) .allServices:hover,
 :global(html:not([data-theme="amigos-dark"]):not([data-theme="dark"])) .allServices:focus-visible {

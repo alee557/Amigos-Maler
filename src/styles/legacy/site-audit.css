@@ -2829,7 +2829,7 @@ html[data-theme="amigos-light"] body #siteHeader.property-value-preservation-hea
                 margin-bottom: clamp(12px, 2vw, 20px) !important;
             }
 
-            html body .hero-content p {
+            html body[data-page="home"] .hero-content p {
                 font-size: clamp(16px, 2.5vw, 22px) !important;
                 line-height: 1.5 !important;
                 text-align: center !important;
@@ -2837,7 +2837,7 @@ html[data-theme="amigos-light"] body #siteHeader.property-value-preservation-hea
 
             #homeHeroButtons.hero-buttons,
             html body #homeHeroButtons.hero-buttons,
-            html body .hero-content .hero-buttons {
+            html body[data-page="home"] .hero-content .hero-buttons {
                 display: flex !important;
                 flex-direction: row !important;
                 flex-wrap: nowrap !important;
@@ -2867,7 +2867,7 @@ html[data-theme="amigos-light"] body #siteHeader.property-value-preservation-hea
 
                 #homeHeroButtons.hero-buttons,
                 html body #homeHeroButtons.hero-buttons,
-                html body .hero-content .hero-buttons {
+                html body[data-page="home"] .hero-content .hero-buttons {
                     flex-direction: column !important;
                     width: 100% !important;
                     gap: 14px !important;

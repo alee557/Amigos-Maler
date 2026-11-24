@@ -133,10 +133,10 @@ export default function Header() {
           p.style.setProperty("stroke", "#000000", "important");
         });
       } else {
-        loginIcon?.style.removeProperty("stroke");
-        loginIcon?.style.removeProperty("color");
+        loginIcon?.style.setProperty("stroke", "#ffffff", "important");
+        loginIcon?.style.setProperty("color", "#ffffff", "important");
         loginIcon?.querySelectorAll("path").forEach((p) => {
-          p.style.removeProperty("stroke");
+          p.style.setProperty("stroke", "#ffffff", "important");
         });
       }
 
